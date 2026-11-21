@@ -43,6 +43,12 @@ object JsonSourceSync {
             try {
                 val response = JsonCatalogHttp().fetch(source, etag)
                 val recipes = response.text?.let { JsonRecipeCatalog.parse(it, source) }
+                // Photos, hors du fil principal et avant d'appliquer le catalogue ; un échec ne
+                // bloque pas la synchro. Catalogue inchangé (304) : les photos déjà enregistrées
+                // de la source, pour réessayer celles qui avaient échoué.
+                val images = recipes?.map { it.image } ?: app.recipes.imagesOf(source.origin)
+                val photos = RecipePhotos.fetchMissing(app.recipes, images, app.log)
+                if (photos > 0) app.log.write("source-json", "${source.id}: $photos photo(s)")
                 main.post {
                     try {
                         val current = app.prefs.jsonRecipeSources.firstOrNull { it.id == source.id }

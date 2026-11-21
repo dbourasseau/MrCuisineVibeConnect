@@ -384,6 +384,13 @@ class RecipeRepo(private val context: Context) {
         }.get()
     }
 
+    /** Photos (champ `image`) des recettes enregistrées pour la source [origin]. */
+    fun imagesOf(origin: String): List<String> {
+        val ids = ArrayList<String>()
+        helper.readableDatabase.rawQuery(RecipeStorageSchema.SOURCE_IDS, arrayOf(origin)).use { c -> while (c.moveToNext()) ids += c.getString(0) }
+        return ids.mapNotNull { get(it)?.image?.takeIf { img -> img.isNotBlank() } }
+    }
+
     /** Explicit source removal keeps the user's favorites available offline. */
     fun removeJsonSource(source: JsonRecipeSource) {
         exec.submit {

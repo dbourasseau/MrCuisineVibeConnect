@@ -15,7 +15,9 @@ data class Release(
 
 /** Lecture de l'API GitHub « dernière version » et comparaison de numéros de version. */
 object Releases {
-    const val REPO = "Wuki60/MrCuisineVibeConnect"
+    // Version maison (PR #13 + #16) : ses mises à jour viennent du fork, pour ne pas installer
+    // une version officielle sans les sources de recettes JSON.
+    const val REPO = "dbourasseau/MrCuisineVibeConnect"
     const val LATEST_URL = "https://api.github.com/repos/$REPO/releases/latest"
     const val PAGE_URL = "https://github.com/$REPO/releases"
 

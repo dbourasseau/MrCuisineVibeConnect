@@ -1,8 +1,6 @@
 package app.toque.recipes
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import app.toque.Logbook
 import app.toque.Prefs
 import app.toque.core.i18n.I18n
@@ -15,7 +13,6 @@ import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.Recipe
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -157,26 +154,8 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     /** Photo réduite (800 px de large au plus), enregistrée sous le nom de fichier de l'URL. */
-    private fun savePhoto(url: String) {
-        val bytes = download(url, emptyMap(), 8 * 1024 * 1024)
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0) throw IOException(tr("image illisible"))
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= MAX_WIDTH) sample *= 2
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: throw IOException(tr("image illisible"))
-        if (bmp.width > MAX_WIDTH) {
-            val scaled = Bitmap.createScaledBitmap(bmp, MAX_WIDTH, bmp.height * MAX_WIDTH / bmp.width, true)
-            if (scaled !== bmp) bmp.recycle()
-            bmp = scaled
-        }
-        val name = url.substringAfterLast('/').substringBefore('?')
-        val tmp = File(repo.imagesDir, "$name.part")
-        FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        bmp.recycle()
-        if (!tmp.renameTo(File(repo.imagesDir, name))) tmp.delete()
-    }
+    private fun savePhoto(url: String) =
+        RecipePhotos.store(repo.imagesDir, url, download(url, emptyMap(), RecipePhotos.MAX_BYTES))
 
     private fun get(url: String, language: String): String =
         String(download(url, McOnline.headers(language), 4 * 1024 * 1024), Charsets.UTF_8)
@@ -251,7 +230,6 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     companion object {
-        private const val MAX_WIDTH = 800
         private val running = AtomicBoolean(false)
     }
 }

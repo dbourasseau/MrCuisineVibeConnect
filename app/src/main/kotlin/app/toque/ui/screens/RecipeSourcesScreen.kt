@@ -30,6 +30,18 @@ class RecipeSourcesScreen(a: MainActivity) : Screen(a) {
         root.setPadding(Ui.u(24), Ui.u(6), Ui.u(24), Ui.u(24))
         root.addView(Ui.text(c, tr("Ajoutez des catalogues publics HTTPS au format toque-recettes-1. Ils s’ajoutent aux recettes Lidl et restent disponibles hors connexion."), 17f, Ui.TEXT2))
         root.addView(Ui.button(c, tr("Ajouter une source"), Ui.Style.PRIMARY, height = 54) { edit(null) }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 14))
+        val favorites = Switch(c).apply {
+            text = tr("Mettre mes recettes en favori")
+            setTextColor(Ui.TEXT)
+            textSize = 16f
+            isChecked = a.prefs.favoriteJson
+            setOnCheckedChangeListener { _, checked ->
+                a.prefs.favoriteJson = checked
+                if (checked) Thread { a.app.recipes.favoriteAllJson() }.start()
+            }
+        }
+        root.addView(favorites, Ui.lp(t = 14))
+        root.addView(Ui.text(c, tr("Toutes les recettes de ces sources, et celles qui arriveront, sont mises en favori (retirer une étoile à la main est respecté)."), 14f, Ui.TEXT3), Ui.lp(t = 4))
         list = Ui.vertical(c)
         root.addView(list, Ui.lp(t = 14))
         render()

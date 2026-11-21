@@ -363,14 +363,16 @@ class RecipeRepo(private val context: Context) {
     /** Replace one JSON source atomically. Recipes withdrawn by the source remain if favorited. */
     fun replaceJsonSource(source: JsonRecipeSource, recipes: List<Recipe>) {
         require(recipes.all { source.owns(it.id) })
+        val favoriteNew = Prefs(context).favoriteJson
         exec.submit {
             val db = helper.writableDatabase
             db.beginTransaction()
             try {
                 val keep = recipes.map { it.id }.toHashSet()
                 val gone = ArrayList<String>()
+                val known = HashSet<String>()
                 db.rawQuery(RecipeStorageSchema.SOURCE_IDS, arrayOf(source.origin)).use { c ->
-                    while (c.moveToNext()) c.getString(0).let { if (it !in keep) gone += it }
+                    while (c.moveToNext()) c.getString(0).let { known += it; if (it !in keep) gone += it }
                 }
                 for (id in gone) db.execSQL(RecipeStorageSchema.DELETE_UNFAVORITED_RECIPE, arrayOf(id, source.origin))
                 val now = System.currentTimeMillis()
@@ -382,9 +384,21 @@ class RecipeRepo(private val context: Context) {
                     v.put("updated", now)
                     v.put("source_id", source.origin)
                     check(db.insertWithOnConflict("recipes", null, v, SQLiteDatabase.CONFLICT_REPLACE) != -1L)
+                    // Option « Mes recettes en favori » : seules les recettes nouvelles pour cette
+                    // source le deviennent, un favori retiré à la main n'est jamais remis.
+                    if (favoriteNew && r.id !in known) db.execSQL("INSERT OR IGNORE INTO favorites (id) VALUES (?)", arrayOf(r.id))
                 }
                 db.setTransactionSuccessful()
             } finally { db.endTransaction() }
+            rebuild()
+        }.get()
+    }
+
+    /** Met en favori toutes les recettes des sources JSON (action unique, à l'activation de l'option). */
+    fun favoriteAllJson() {
+        exec.submit {
+            helper.writableDatabase.execSQL(
+                "INSERT OR IGNORE INTO favorites (id) SELECT id FROM recipes WHERE source_id != ?", arrayOf(RecipeStorageSchema.LIDL))
             rebuild()
         }.get()
     }

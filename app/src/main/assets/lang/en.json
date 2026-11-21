@@ -353,6 +353,8 @@
   "Surcharge": "Overload",
   "Surtension secteur": "Mains overvoltage",
   "Synchro automatique chaque nuit": "Automatic sync every night",
+  "Mettre mes recettes en favori": "Mark my recipes as favourites",
+  "Toutes les recettes de ces sources, et celles qui arriveront, sont mises en favori (retirer une étoile à la main est respecté).": "All recipes from these sources, and those that arrive later, are marked as favourites (removing a star by hand is respected).",
   "Masquer les recettes du catalogue officiel": "Hide the official catalogue recipes",
   "Cache les recettes officielles (liste, recherche, favoris) sans les effacer et coupe leur synchro nocturne. Les recettes de vos sources JSON restent.": "Hides the official recipes (list, search, favourites) without deleting them and stops their nightly sync. Recipes from your JSON sources stay.",
   "Synchronisation avec les serveurs Lidl…": "Syncing with Lidl's servers…",

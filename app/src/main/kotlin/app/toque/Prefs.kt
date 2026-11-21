@@ -132,6 +132,13 @@ class Prefs(context: Context) {
             p.edit().putBoolean("hideCatalog", v).commit()
         }
 
+    /** Les recettes des sources JSON (nouvelles à chaque synchro) sont mises en favori. */
+    var favoriteJson: Boolean
+        get() = p.getBoolean("favoriteJson", false)
+        set(v) {
+            p.edit().putBoolean("favoriteJson", v).commit()
+        }
+
     var autoSync: Boolean
         get() = p.getBoolean("autoSync", true)
         set(v) {

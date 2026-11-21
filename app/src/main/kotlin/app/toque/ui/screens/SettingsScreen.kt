@@ -160,6 +160,12 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         lidl.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52) { a.openVendorApp() },
             Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
         lidl.addView(toggle(tr("Synchro automatique chaque nuit"), a.prefs.autoSync) { a.prefs.autoSync = it }, Ui.lp(t = 10))
+        lidl.addView(toggle(tr("Masquer les recettes du catalogue officiel"), a.prefs.hideCatalog) { on ->
+            a.prefs.hideCatalog = on
+            Thread { a.app.recipes.refresh() }.start()
+        }, Ui.lp(t = 10))
+        lidl.addView(Ui.text(c, tr("Cache les recettes officielles (liste, recherche, favoris) sans les effacer et coupe leur synchro nocturne. Les recettes de vos sources JSON restent."),
+            14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 4))
 
         val sources = section(right, tr("Sources de recettes JSON"), Icon.Kind.LINK)
         sources.addView(link(tr("Gérer les catalogues personnels")) { a.push(RecipeSourcesScreen(a)) })

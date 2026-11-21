@@ -353,6 +353,8 @@
   "Surcharge": "Overload",
   "Surtension secteur": "Mains overvoltage",
   "Synchro automatique chaque nuit": "Automatic sync every night",
+  "Masquer les recettes du catalogue officiel": "Hide the official catalogue recipes",
+  "Cache les recettes officielles (liste, recherche, favoris) sans les effacer et coupe leur synchro nocturne. Les recettes de vos sources JSON restent.": "Hides the official recipes (list, search, favourites) without deleting them and stops their nightly sync. Recipes from your JSON sources stay.",
   "Synchronisation avec les serveurs Lidl…": "Syncing with Lidl's servers…",
   "Synchronisation déjà en cours": "Sync already in progress",
   "Synchronisation en cours… (quelques minutes)": "Syncing… (a few minutes)",

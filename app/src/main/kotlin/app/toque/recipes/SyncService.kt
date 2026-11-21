@@ -18,7 +18,7 @@ import java.util.Calendar
 class SyncService : IntentService("toque-synchro") {
     override fun onHandleIntent(intent: Intent?) {
         val app = ToqueApp.of(this)
-        if (!app.prefs.autoSync) return
+        if (!app.prefs.autoSync || app.prefs.hideCatalog) return
         if (System.currentTimeMillis() - app.prefs.lastSyncMs < 6 * 3600_000L) return
         OnlineSync(this, app.prefs, app.recipes, app.log).sync()
     }

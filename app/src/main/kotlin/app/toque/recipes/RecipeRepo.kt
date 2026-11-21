@@ -14,6 +14,7 @@ import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.SearchIndex
 import app.toque.core.recipes.adjusted
+import app.toque.Prefs
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -90,8 +91,12 @@ class RecipeRepo(private val context: Context) {
         val favs = HashSet<String>()
         db.rawQuery("SELECT id FROM favorites", null).use { c -> while (c.moveToNext()) favs += c.getString(0) }
         val list = ArrayList<Recipe>()
-        db.rawQuery("SELECT json FROM recipes", null).use { c ->
+        val hideCatalog = Prefs(context).hideCatalog
+        db.rawQuery("SELECT json, source_id FROM recipes", null).use { c ->
             while (c.moveToNext()) {
+                // Option « Masquer le catalogue officiel » : les recettes de la synchro Lidl /
+                // monsieur-cuisine.com restent en base mais ne sont ni listées ni cherchées.
+                if (hideCatalog && c.getString(1) == RecipeStorageSchema.LIDL) continue
                 val r = try {
                     RecipeCodec.decode(c.getString(0), RecipeSource.IMPORTED)
                 } catch (_: Exception) {

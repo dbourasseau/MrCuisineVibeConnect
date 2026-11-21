@@ -125,6 +125,13 @@ class Prefs(context: Context) {
             p.edit().putString("lastZone", v).commit()
         }
 
+    /** Masque les recettes du catalogue officiel (synchro Lidl / monsieur-cuisine.com) ; les sources JSON restent. */
+    var hideCatalog: Boolean
+        get() = p.getBoolean("hideCatalog", false)
+        set(v) {
+            p.edit().putBoolean("hideCatalog", v).commit()
+        }
+
     var autoSync: Boolean
         get() = p.getBoolean("autoSync", true)
         set(v) {

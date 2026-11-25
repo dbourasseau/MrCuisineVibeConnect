@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import app.toque.Logbook
+import app.toque.core.mealie.MealieRecipes
 import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.IndexedRecipe
 import app.toque.core.recipes.Recipe
@@ -597,7 +598,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
     /**
      * Remplace tout le catalogue Lidl par l'import du jour (miroir de l'appli d'origine).
      * Les favoris sont conservés ; ceux marqués dans l'appli d'origine sont ajoutés.
-     * Les recettes perso et celles de la communauté (toqueapp.org) restent.
+     * Les recettes perso, celles de la communauté (toqueapp.org) et celles de Mealie restent.
      */
     fun replaceAll(recipes: List<Recipe>) {
         exec.submit { replaceAllNow(recipes) }.get()
@@ -608,8 +609,8 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         val before = titles(db)
         db.beginTransaction()
         try {
-            db.delete("recipes", "id NOT LIKE ? AND id NOT LIKE ? AND id NOT LIKE ?",
-                arrayOf(UserRecipes.ID_PREFIX + "%", CommunityRecipes.ID_PREFIX + "%", JSON_PREFIX + "%"))
+            db.delete("recipes", "id NOT LIKE ? AND id NOT LIKE ? AND id NOT LIKE ? AND id NOT LIKE ?",
+                arrayOf(UserRecipes.ID_PREFIX + "%", CommunityRecipes.ID_PREFIX + "%", MealieRecipes.ID_PREFIX + "%", JSON_PREFIX + "%"))
             val now = System.currentTimeMillis()
             for (r in recipes) {
                 writeRecipe(db, r, now)
@@ -649,7 +650,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
 
     /**
      * Supprime les recettes Lidl absentes de [keep] (catalogue miroir de la source) ; jamais les
-     * recettes perso ni celles de la communauté.
+     * recettes perso, ni celles de la communauté ou de Mealie.
      */
     fun removeAllExcept(keep: Set<String>, rebuild: Boolean = true) {
         exec.submit {
@@ -691,7 +692,31 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         }.get()
     }
 
-    private fun isLidl(id: String) = !UserRecipes.isUser(id) && !CommunityRecipes.isCommunity(id) && !id.startsWith(JSON_PREFIX)
+    /** Identifiants des recettes Mealie enregistrées. */
+    fun mealieIds(): Set<String> = ids().filterTo(HashSet()) { MealieRecipes.isMealie(it) }
+
+    /**
+     * Retire les recettes Mealie absentes de [keep] (retirées du serveur, ou toutes en déliant),
+     * favorites comprises : le serveur fait foi. Leurs notes et cuissons restent.
+     */
+    fun removeMealieExcept(keep: Set<String>) {
+        exec.submit {
+            val db = helper.writableDatabase
+            val gone = titles(db).keys.filter { MealieRecipes.isMealie(it) && it !in keep }
+            if (gone.isEmpty()) return@submit
+            db.beginTransaction()
+            try {
+                for (id in gone) db.delete("recipes", "id = ?", arrayOf(id))
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+            reloadNow()
+        }.get()
+    }
+
+    private fun isLidl(id: String) = !UserRecipes.isUser(id) && !CommunityRecipes.isCommunity(id) && !MealieRecipes.isMealie(id) &&
+        !id.startsWith(JSON_PREFIX)
 
     /**
      * Enregistre une recette perso (nouvelle ou modifiée) sans attendre : elle est lisible ([get]) et

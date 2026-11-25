@@ -9,6 +9,12 @@ and still uses **the official Lidl recipes**.
 🌐 **[toqueapp.org](https://toqueapp.org)**, the Toque community site: share your recipes, find other
 users' ones and send them to your robot.
 
+📱 **[Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)**, the phone and tablet app: follow
+the cooking and send recipes to your robot over your home Wi-Fi.
+
+❤️ **[Support Toque](https://toqueapp.org/donate.php)**: Toque is free and ad-free, a donation helps keep
+it going.
+
 ## Supported robots
 
 | Robot | Label under the robot | Status | How to install |
@@ -43,7 +49,7 @@ Toque's own recipe site, free and ad-free, in English, French, German, Spanish, 
 - **Publish your recipes** on the site or straight from the robot. Each step's settings (time,
   temperature, speed) are checked with the same safety rules as on the robot.
 - **Send them to your robot**: community recipes reach the robot without any account
-  (*Settings › Recipes › Community*). With a free, optional Toque account (linked on the same page),
+  (*Settings › Recipes › toqueapp.org*). With a free, optional Toque account (linked on the same page),
   your favourites and your own recipes follow you to the robot.
 - **Translate** other people's recipes into your language, **follow** the cooks you like, and report
   what doesn't belong there.
@@ -52,6 +58,31 @@ Toque's own recipe site, free and ad-free, in English, French, German, Spanish, 
 
 A question, or a robot you would like Toque to support: [contact page](https://toqueapp.org/contact.php).
 If Toque helps you, you can [support the project](https://toqueapp.org/donate.php).
+
+## Phone and tablet: [Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)
+
+Toque Compagnon is the Android app for phones and tablets that goes with Toque, on the Connect and
+the Smart (in test). It talks to the robot over your home Wi-Fi only, never through the Internet.
+
+- **Follow the cooking live**: time left, temperature, speed and weight, with notifications even when
+  the app is closed.
+- **Control it within limits**: pause, stop, resume, change the setting, tare the scale, and start a
+  manual cooking with the lid closed. Starting a recipe, a step or a program, Turbo, resuming after
+  the lid was opened and blending hot food stay on the robot. Every command from the phone goes
+  through the same safety checks as a press on the robot's screen.
+- **Recipes**: browse the robot's recipes with their photos, change the number of people, mark your
+  favourites, send a recipe to the robot's Home screen, and write your own.
+- A **shopping list** kept on the phone, tablet and landscape layouts, in English, French, German,
+  Spanish, Catalan and Ukrainian.
+
+**Get it**: download the APK from the
+[latest release of Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon/releases/latest). It
+needs Toque 0.10.0 or later on the robot.
+
+**Link a phone**: on the robot, *Settings › Phone › Pair a phone*, then scan the QR code with the app,
+or type the 6-digit code shown under it (valid 2 minutes). The robot listens only once a phone is
+paired or the pairing screen is open, and a phone that is not paired cannot see it, even on the same
+Wi-Fi. The pairing screen lists the paired phones and removes the ones you no longer use.
 
 ## Install with an AI agent (Connect)
 
@@ -86,8 +117,8 @@ two steps that need MediaTek download mode, and TWRP writes the rest.
 1. Install [Homebrew](https://brew.sh), then `brew install python libusb` and `xcode-select --install`.
 2. Get a **USB-A ↔ USB-A** cable; on a Mac with only USB-C ports, add a **USB-C → USB-A adapter**.
 3. From the repository folder, run the steps in order, each when the previous one says so:
-   `bash tools/setup/toque-setup.sh prepare`, then `backup`, `flash-twrp` (on an SKMC 1100 A1,
-   `own-twrp` first), `root`, `flash-root`, `android`, `install`, and optionally `wifi`.
+   `bash tools/setup/toque-setup.sh prepare`, then `backup`, `flash-twrp` (on an SKMC 1100 A1 or
+   SKMC 1200 D4, `own-twrp` first), `root`, `flash-root`, `android`, `install`, and optionally `wifi`.
    `bash tools/setup/toque-setup.sh status` shows where you are.
 4. **Keep a copy of `~/Toque/backup/`** (USB stick or cloud): it is your way back.
 
@@ -113,11 +144,17 @@ SKMC 1100 A1 not tested yet: please report). Thanks to @julienperrault and @flex
   Requests are spaced out and only new or changed recipes are downloaded again. The recipes already
   in the stock app can still be imported instead.
 - **Community recipes from [toqueapp.org](https://toqueapp.org)**: recipes shared by Toque users
-  arrive on the robot (*Settings › Recipes › Community*), no account needed. With a free Toque account
+  arrive on the robot (*Settings › Recipes › toqueapp.org*), no account needed. With a free Toque account
   (optional, offered once and never again if declined; linked on the same page), the site's
   favourites come to the robot and your own recipes can be published from the robot. The site is in
   French, English, German, Spanish, Catalan and Ukrainian; only a revocable key of the robot is kept,
   never the password.
+- **Your own [Mealie](https://mealie.io) server** (self-hosted recipes): link the robot to it
+  (*Settings › Other*, with your username or an API token) and all its recipes arrive on
+  the robot, read-only, nightly or on demand, with a "Mealie" chip in the list. Settings written in
+  the steps ("5 min/100 °C/speed 1", "10 sec/speed 5", "Turbo 3 times", "dough mode 2 min") are
+  suggested and must be checked before they start, like imported recipes. Only a token of the robot is
+  kept ("Toque (robot)", revocable in Mealie), never the password.
 - **Author, ratings and reviews**: each recipe shows who published it and its rating on the site,
   and the recipe page loads the users' comments (with Monsieur Cuisine's replies).
 - **Search that works**: ignores accents, plurals and typos ("bechamle", "risoto"), in any alphabet
@@ -287,9 +324,10 @@ already stored for git).
 - Contributions: @pierok13 (standby, notes and quantities, speed stages, sounds, recent recipes,
   Android 6 roots, bowl sensor), @lucasbraud, @OUTSIDE2k8 (Spanish), @Locodice67 (German, clock at start, install
   script), @baptiste-gislot, @florentdestremau (rotary knob), @maximehuran (knob light in standby),
-  @badrbelhaj1 (Magisk at restart, SKMC 1100 A1 TWRP, heat without stirring, settings menu, recipe
-  filters and sort, kitchen timers, colour wheel, knob ring colours, startup screen, fast serial
-  port check, install checks, interface fixes),
+  @badrbelhaj1 (Toque Compagnon, the phone app and its robot side, Magisk at restart, SKMC 1100 A1
+  TWRP, heat without stirring, settings menu, recipe filters and sort, recipe list ready in a second,
+  kitchen timers, colour wheel, knob ring colours, startup screen, fast serial port check, install
+  checks, interface fixes),
   @meuca1 (Catalan), @Flav974 (Smart port: protocol, programs, captures), @Tidusneo24150 (Camybrith
   Cooking: Smart temperature ranges and recipe modes, review on a real Smart), @pierrearnou (accent
   colours, switches), @oscarsanchezdm (recipe language, light theme), @phanex (Ukrainian, search in

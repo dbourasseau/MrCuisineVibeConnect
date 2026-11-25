@@ -33,6 +33,12 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
 
     val asleep: Boolean get() = view != null
 
+    /** Temps sans geste ni signe de vie du robot (programme, couvercle, balance), en ms. */
+    val idleMs: Long get() = SystemClock.uptimeMillis() - lastInputMs
+
+    /** Sortie de veille (pas à l'arrêt de l'écran) : l'alerte de mise à jour regarde à ce moment-là. */
+    var onWake: (() -> Unit)? = null
+
     private val check = object : Runnable {
         override fun run() {
             if (shouldSleep()) sleep()
@@ -45,6 +51,14 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
             refresh()
             move()
             main.postDelayed(this, 60_000)
+        }
+    }
+
+    /** Heure pas encore réglée : on regarde souvent, pour la montrer dès qu'elle l'est (le reste attend la minute). */
+    private val clockTick = object : Runnable {
+        override fun run() {
+            clock?.text = WallClock.text()
+            if (!WallClock.known && view != null) main.postDelayed(this, WallClock.UNKNOWN_TICK_MS)
         }
     }
 
@@ -106,7 +120,8 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
         val t = Ui.text(a, "", 150f, 0xFF7C828B.toInt(), Ui.THIN)
         b.addView(t, Ui.lp(Ui.WRAP, Ui.WRAP))
-        val h = Ui.text(a, "", 22f, Ui.WARN, Ui.MEDIUM)
+        // La veille est noire dans les deux thèmes : l'avertissement garde sa teinte claire.
+        val h = Ui.text(a, "", 22f, Ui.WARN_ON_DARK, Ui.MEDIUM)
         b.addView(h, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
         b.addView(Ui.text(a, tr("Touchez l'écran pour reprendre"), 17f, 0xFF3E434A.toInt()), Ui.lp(Ui.WRAP, Ui.WRAP, t = 18))
         v.addView(b, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
@@ -119,13 +134,18 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         v.alpha = 0f
         v.animate().alpha(1f).setDuration(800).start()
         brightness(0.02f)
-        if (a.prefs.standbyKnobLight) KnobLight.start()
+        when (a.prefs.standbyKnob) {
+            "dim" -> KnobLight.start(KnobLight.NIGHT_LEVEL)
+            "off" -> KnobLight.start(0)
+        }
         main.postDelayed(tick, 60_000)
+        if (!WallClock.known) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
     }
 
     private fun wake() {
         val v = view ?: return
         main.removeCallbacks(tick)
+        main.removeCallbacks(clockTick)
         v.animate().cancel()
         root.removeView(v)
         view = null
@@ -134,10 +154,11 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         hot = null
         brightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
         KnobLight.stop()
+        if (running) onWake?.invoke()
     }
 
     private fun refresh() {
-        clock?.text = MainActivity.now()
+        clock?.text = WallClock.text()
         val temp = a.snapshot.actualTempC
         hot?.let {
             it.text = if (temp >= 50) tr("Bol chaud : %d °C", temp) else ""

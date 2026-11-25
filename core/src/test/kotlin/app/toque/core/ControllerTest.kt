@@ -8,6 +8,7 @@ import app.toque.core.machine.FaultCode
 import app.toque.core.machine.JobKind
 import app.toque.core.machine.JobSpec
 import app.toque.core.machine.JobState
+import app.toque.core.machine.Limits
 import app.toque.core.machine.LinkState
 import app.toque.core.machine.MachineController
 import app.toque.core.machine.MachineEvent
@@ -134,6 +135,60 @@ class ControllerTest {
         assertTrue(b.snap.bowlDetected)
         val v = b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 5_000))
         assertTrue(v.message, v.ok)
+    }
+
+    @Test fun removedBowlIsToldApartFromAnOpenLid() {
+        // Le sens du capteur est constaté couvercle fermé (le bol y est forcément) : cela marche
+        // aussi sur les robots où le bit se lit à l'envers. board.bowlPresent est ici la valeur brute du bit.
+        for (seated in listOf(true, false)) {
+            val b = Bench()
+            b.board.bowlPresent = seated
+            b.ready()
+            b.step(1_000)
+            assertFalse(b.snap.bowlRemoved)
+            assertTrue(b.snap.bowlSenseKnown)
+            assertEquals(!seated, b.snap.bowlSenseInverted)
+            // Le bit « bol » bascule quelques trames avant celui du couvercle : ces trames-là ne changent
+            // pas le sens retenu.
+            b.board.bowlPresent = !seated
+            b.step(300)
+            b.board.lidOpen = true
+            b.step(300)
+            assertTrue(b.snap.bowlRemoved)
+            assertEquals(!seated, b.snap.bowlSenseInverted)
+            b.board.bowlPresent = seated
+            b.step(300)
+            assertTrue(b.snap.lidOpen)
+            assertFalse(b.snap.bowlRemoved)
+            assertEquals("Fermez et verrouillez le couvercle", b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).message)
+            b.board.bowlPresent = !seated
+            b.step(300)
+            assertTrue(b.snap.bowlRemoved)
+            assertEquals("Remettez le bol et fermez le couvercle", b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).message)
+            b.board.bowlPresent = seated
+            b.board.lidOpen = false
+            b.step(300)
+            assertFalse(b.snap.bowlRemoved)
+            assertTrue(b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).ok)
+        }
+        // Couvercle jamais vu fermé : le sens est inconnu, on ne dit que « couvercle ouvert ».
+        val b = Bench()
+        b.board.lidOpen = true
+        b.step(600)
+        assertFalse(b.snap.bowlSenseKnown)
+        assertFalse(b.snap.bowlRemoved)
+        // Fermé depuis moins d'une seconde : pas encore retenu.
+        b.board.lidOpen = false
+        b.step(600)
+        assertFalse(b.snap.bowlSenseKnown)
+        b.step(600)
+        assertTrue(b.snap.bowlSenseKnown)
+        // Sens retenu d'une fois précédente (ici à l'envers) : le bol retiré est reconnu dès le démarrage.
+        val known = Bench(ControllerConfig(bowlBitSeated = false))
+        known.board.lidOpen = true
+        known.step(600)
+        assertTrue(known.snap.bowlSenseKnown)
+        assertTrue(known.snap.bowlRemoved)
     }
 
     @Test fun lidOpeningPausesAndNothingRestartsAlone() {
@@ -369,6 +424,70 @@ class ControllerTest {
         assertEquals(0, b.snap.rpm)
     }
 
+    @Test fun manualHeatsWithoutStirring() {
+        // Vitesse 0 : acceptée en chauffe seulement.
+        assertTrue(SafetyPolicy.checkJob(Programs.manual(0, 13, Direction.CLOCKWISE, 60_000), null).isEmpty())
+        assertTrue(SafetyPolicy.checkJob(Programs.manual(0, 0, Direction.CLOCKWISE, 60_000), null).any { it.code == "speed_min" })
+        val step = app.toque.core.recipes.StepMachine(seconds = 600, speed = 0, tempC = 90)
+        assertTrue(step.violations().toString(), step.valid)
+        assertEquals("10 min · 90 °C · sans mélange", step.summary)
+        assertFalse(app.toque.core.recipes.StepMachine(seconds = 600, speed = 0).valid)
+
+        // Sans mélange, la base ne chauffe pas en STANDARD : la trame part en opération vapeur.
+        // 120 °C au plus (le niveau du programme Vapeur), et toujours le sens normal.
+        assertEquals(120, Mcc.celsiusForLevel(Limits.MAX_TEMP_LEVEL_NO_STIR))
+        assertEquals(Programs.steam().phases[0].setting.temperatureLevel, Limits.MAX_TEMP_LEVEL_NO_STIR)
+        assertTrue(SafetyPolicy.checkJob(Programs.manual(0, 17, Direction.CLOCKWISE, 60_000), null).isEmpty())
+        assertTrue(SafetyPolicy.checkJob(Programs.manual(0, 18, Direction.CLOCKWISE, 60_000), null).any { it.code == "no_stir_temp" })
+        assertFalse(SafetyPolicy.checkJob(Programs.manual(1, 18, Direction.CLOCKWISE, 60_000), null).any { it.code == "no_stir_temp" })
+        assertEquals(Direction.CLOCKWISE, Programs.manual(0, 5, Direction.COUNTER_CLOCKWISE, 60_000).phases[0].setting.direction)
+        assertEquals(Direction.COUNTER_CLOCKWISE, Programs.manual(2, 5, Direction.COUNTER_CLOCKWISE, 60_000).phases[0].setting.direction)
+        assertTrue(SafetyPolicy.checkSetting(Setting(Operation.STEAM, 0, 5, Direction.COUNTER_CLOCKWISE), JobKind.MANUAL, Accessory.BLADE, null, false)
+            .any { it.code == "no_stir_dir" })
+        assertEquals(Operation.STEAM, Programs.manualOperation(0, 5))
+        assertEquals(Operation.STANDARD, Programs.manualOperation(1, 5))
+        assertEquals(Operation.STANDARD, Programs.manualOperation(0, 0))
+        val b = Bench().ready()
+        assertTrue(b.c.startJob(Programs.manual(0, 5, Direction.CLOCKWISE, 60_000)).ok)
+        b.step(10_000)
+        assertTrue(b.tx.none { it[1] == Operation.STANDARD.wire })
+        val heat = b.tx.filter { it[1] == Operation.STEAM.wire }
+        assertTrue(heat.isNotEmpty())
+        assertTrue(heat.all { it[2] == 0 && it[3] == 5 })
+        assertEquals(0, b.snap.rpm)
+        assertTrue(b.snap.heaterOn)
+        assertFalse(b.snap.motorOn)
+        // En cours de route : lancer le mélange puis l'arrêter, chaque fois par un arrêt confirmé ;
+        // couper la chauffe à vitesse 0 est refusé.
+        var mark = b.tx.size
+        assertTrue(b.c.adjust(speed = 2).ok)
+        b.step(3_000)
+        assertTrue(b.snap.rpm > 0)
+        assertEquals(Operation.STOP.wire, b.tx[mark][1])
+        assertEquals(Operation.STANDARD.wire, b.lastOp())
+        assertEquals(5, b.tx.last()[3])
+        mark = b.tx.size
+        assertTrue(b.c.adjust(speed = 0).ok)
+        b.step(3_000)
+        assertEquals(0, b.snap.rpm)
+        assertEquals(Operation.STOP.wire, b.tx[mark][1])
+        assertEquals(Operation.STEAM.wire, b.lastOp())
+        assertTrue(b.snap.heaterOn)
+        assertEquals(JobState.RUNNING.name, b.snap.jobState)
+        assertFalse(b.c.adjust(temperatureLevel = 0).ok)
+        assertFalse(b.c.adjust(temperatureLevel = 18).ok)
+        assertEquals(5, b.snap.jobTempLevel)
+        // Mélange en sens inverse, puis arrêt du mélange : la trame repasse en sens normal.
+        assertTrue(b.c.adjust(speed = 2, direction = Direction.COUNTER_CLOCKWISE).ok)
+        b.step(3_000)
+        assertEquals(Direction.COUNTER_CLOCKWISE.wire, b.tx.last()[4])
+        assertTrue(b.c.adjust(speed = 0).ok)
+        b.step(3_000)
+        assertEquals(Operation.STEAM.wire, b.lastOp())
+        assertEquals(Direction.CLOCKWISE.wire, b.tx.last()[4])
+        assertFalse(b.snap.jobReverse)
+    }
+
     @Test fun tareIsAOneFramePulse() {
         val b = Bench().ready()
         b.board.contentWeightG = 600
@@ -379,5 +498,21 @@ class ControllerTest {
         assertEquals(0xA9, frame[4].toInt() and 0xFF)
         assertEquals(0, b.c.tick()[4].toInt())
         assertEquals(Mcc.TX_SIZE, frame.size)
+    }
+
+    @Test fun scaleStabilityIsComputedFromJitter() {
+        val b = Bench().ready()
+        b.board.contentWeightG = 0
+        b.step(1_000)
+        assertTrue(b.snap.scaleStable)
+
+        b.board.contentWeightG = 500
+        b.step(100)
+        assertFalse(b.snap.scaleStable)
+
+        b.step(2_000)
+        assertTrue(b.snap.scaleStable)
+        // La balance simulée tend vers 500 g sans forcément l'atteindre (troncature) : à 2 g près.
+        assertTrue("poids ${b.snap.weightG}", kotlin.math.abs(b.snap.weightG - 500) <= 2)
     }
 }

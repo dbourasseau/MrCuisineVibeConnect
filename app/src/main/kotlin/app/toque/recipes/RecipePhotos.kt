@@ -54,6 +54,7 @@ object RecipePhotos {
         for (url in missing) {
             try {
                 store(repo.imagesDir, url, httpsBytes(url))
+                repo.photoSaved(url.substringAfterLast('/').substringBefore('?'))
                 saved++
                 inARow = 0
             } catch (e: Exception) {

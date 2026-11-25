@@ -26,8 +26,10 @@ data class RecipeAdjustments(
     val qty: Map<String, String> = emptyMap(),
     /** Pesées absentes de la liste d'ingrédients : clé [weighKey] → poids voulu, en grammes. */
     val weigh: Map<String, Int> = emptyMap(),
+    /** Nombre de personnes voulu (0 : celui de la recette), voir [Portions]. */
+    val servings: Int = 0,
 ) {
-    val isEmpty: Boolean get() = note.isBlank() && qty.isEmpty() && weigh.isEmpty()
+    val isEmpty: Boolean get() = note.isBlank() && qty.isEmpty() && weigh.isEmpty() && servings == 0
 
     fun withNote(text: String): RecipeAdjustments = copy(note = text.trim())
 
@@ -47,7 +49,11 @@ data class RecipeAdjustments(
         else this.weigh + (key to grams.coerceIn(1, MAX_GRAMS)))
     }
 
-    fun encode(): String = Json.write(linkedMapOf("note" to note, "qty" to qty, "weigh" to weigh))
+    /** [people] hors de [Portions.range] ou égal à [base] : la recette revient à son nombre de personnes. */
+    fun withServings(people: Int, base: Int): RecipeAdjustments =
+        copy(servings = if (people == base || people !in Portions.range(base)) 0 else people)
+
+    fun encode(): String = Json.write(linkedMapOf("note" to note, "qty" to qty, "weigh" to weigh, "servings" to servings))
 
     /**
      * Report sur [target], la même recette venue de l'autre source (même titre), quand celle-ci est
@@ -59,7 +65,8 @@ data class RecipeAdjustments(
         val keys = target.withSplitQuantities().ingredients.flatMap { it.items }.map { qtyKey(it) }.toHashSet()
         val q = LinkedHashMap(existing.qty)
         for ((k, v) in qty) if (k in keys && k !in q) q[k] = v
-        return existing.copy(note = existing.note.ifBlank { note }, qty = q)
+        val people = if (existing.servings > 0) existing.servings else if (servings in Portions.range(target.servings)) servings else 0
+        return existing.copy(note = existing.note.ifBlank { note }, qty = q, servings = if (people == target.servings) 0 else people)
     }
 
     companion object {
@@ -87,7 +94,8 @@ data class RecipeAdjustments(
             val weighMap = m["weigh"].obj()
             val weigh = LinkedHashMap<String, Int>()
             for (k in weighMap.keys) weighMap.int(k)?.takeIf { it in 1..MAX_GRAMS }?.let { weigh[k] = it }
-            return RecipeAdjustments(m.str("note")?.trim().orEmpty(), qty, weigh)
+            val people = (m.int("servings") ?: 0).coerceIn(0, 99)
+            return RecipeAdjustments(m.str("note")?.trim().orEmpty(), qty, weigh, people)
         }
     }
 }
@@ -267,8 +275,17 @@ fun Recipe.unlistedWeighings(): List<Pair<Int, String>> {
     }
 }
 
-/** La recette telle que l'utilisateur la veut ; les valeurs d'origine restent dans `originalQty` / `originalGrams`. */
+/**
+ * La recette telle que l'utilisateur la veut : ses corrections, puis son nombre de personnes.
+ * Les valeurs d'origine restent dans `originalQty` / `originalGrams`.
+ */
 fun Recipe.adjusted(a: RecipeAdjustments): Recipe {
+    val corrected = corrected(a)
+    return if (a.servings in Portions.range(servings)) corrected.forServings(a.servings) else corrected
+}
+
+/** Les corrections de quantités seules, pour la recette à son nombre de personnes. */
+fun Recipe.corrected(a: RecipeAdjustments): Recipe {
     val base = withSplitQuantities()
     if (a.qty.isEmpty() && a.weigh.isEmpty()) return base
     val flat = base.allIngredients

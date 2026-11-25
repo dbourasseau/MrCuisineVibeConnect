@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.os.Process
 import android.os.RemoteException
 import app.toque.Logbook
 import app.toque.Prefs
@@ -20,11 +21,13 @@ import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.ControllerConfig
+import app.toque.core.machine.DemoCodec
 import app.toque.core.machine.JobState
 import app.toque.core.machine.MachineEvent
 import app.toque.core.machine.MachineLoop
 import app.toque.core.machine.MonotonicClock
 import app.toque.core.machine.RootSerialTransport
+import app.toque.core.robot.RobotProfiles
 import app.toque.core.machine.SimBoard
 import app.toque.core.machine.SimTransport
 import app.toque.core.machine.Snapshot
@@ -48,6 +51,12 @@ class MachineService : Service() {
     private var lastNotified = ""
     private lateinit var prefs: Prefs
     private lateinit var log: Logbook
+
+    /**
+     * Ce que ce service a constaté sur la base du robot. Dans un fichier à lui : les réglages
+     * (Prefs) ne sont écrits que par l'interface, qui tourne dans un autre processus.
+     */
+    private val learned by lazy { getSharedPreferences("base", Context.MODE_PRIVATE) }
 
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { msg ->
         try {
@@ -88,13 +97,16 @@ class MachineService : Service() {
     private fun createLoop() {
         loop?.shutdown()
         prefs = Prefs(this) // relit le fichier écrit par l'interface
+        RobotProfiles.active = prefs.robot
         val mode = prefs.mode
         sim = null
         val factory: () -> Transport = when (mode) {
             Prefs.Mode.DEMO -> {
                 val board = SimBoard(MonotonicClock)
                 sim = board
-                ({ SimTransport(board) })
+                // Démo du robot choisi : ses règles, avec la base simulée du Connect.
+                val codec = DemoCodec.forRobot(prefs.robot.newCodec())
+                ({ SimTransport(board, codec) })
             }
             Prefs.Mode.TWIN -> {
                 val host = prefs.twinHost
@@ -102,21 +114,50 @@ class MachineService : Service() {
                 ({ TcpTransport(host, port) })
             }
             Prefs.Mode.HARDWARE -> {
+                if (!prefs.robotConfirmed) {
+                    // Jamais de trame tant que la personne n'a pas confirmé son robot : une trame d'un
+                    // autre protocole pourrait être mal comprise par la base.
+                    log.write("machine", "robot non confirmé : liaison avec la base fermée")
+                    loop = null
+                    return
+                }
+                val robot = prefs.robot
                 val dev = prefs.serialDevice
                 val vendor = prefs.vendorPackage
-                ({ RootSerialTransport(dev, 4800, vendor) })
+                log.write("machine", "robot : ${robot.displayName} ($dev, ${robot.baud} bauds)")
+                ({ RootSerialTransport(dev, robot.baud, vendor, robot.extraStopPackages, robot.newCodec()) })
             }
         }
+        // Le sens du capteur du bol n'est retenu que pour la vraie base : une base simulée a le sien.
+        val real = mode == Prefs.Mode.HARDWARE
+        val seated = if (real && learned.contains(BOWL_BIT_SEATED)) learned.getBoolean(BOWL_BIT_SEATED, true) else null
         val l = MachineLoop(
             transportFactory = factory,
-            config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp),
-            onSnapshot = { s -> main.post { publish(s) } },
+            config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp,
+                bowlAutoZero = prefs.bowlAutoZero, emptyBowlG = prefs.emptyBowlG, bowlBitSeated = seated),
+            // Cadence du robot pour la vraie base ; la démo et le jumeau parlent comme le Connect.
+            periodMs = if (mode == Prefs.Mode.HARDWARE) prefs.robot.framePeriodMs else RobotProfiles.MC_CONNECT.framePeriodMs,
+            onSnapshot = { s -> main.post { if (real) rememberBowlSense(s); publish(s) } },
             onEvent = { e -> main.post { broadcastEvent(e) } },
             log = { line -> log.write("machine", line) },
+            // Boucle bloquée et rien ne la débloque : le chien de garde a déjà envoyé des STOP ; on abandonne le
+            // processus. Android relance le service (START_STICKY) et la nouvelle boucle émet des trames STOP.
+            onUnrecoverable = {
+                log.write("machine", "boucle bloquée : le processus machine est abandonné pour repartir proprement")
+                Process.killProcess(Process.myPid())
+            },
         )
         loop = l
         l.start()
         log.write("machine", "boucle démarrée en mode ${mode.label}")
+    }
+
+    /** Retient le sens du capteur du bol constaté par le contrôleur, pour reconnaître un bol retiré dès le prochain démarrage. */
+    private fun rememberBowlSense(s: Snapshot) {
+        if (!s.bowlSenseKnown) return
+        val seated = !s.bowlSenseInverted
+        if (!learned.contains(BOWL_BIT_SEATED) || learned.getBoolean(BOWL_BIT_SEATED, seated) != seated)
+            learned.edit().putBoolean(BOWL_BIT_SEATED, seated).apply()
     }
 
     private fun publish(s: Snapshot) {
@@ -151,6 +192,7 @@ class MachineService : Service() {
         m.data = Bundle().apply {
             putString("type", e.type.name)
             putString("message", e.message)
+            putInt("value", e.value)
         }
         send(m)
         log.write("évènement", "${e.type} ${e.message}")
@@ -181,9 +223,19 @@ class MachineService : Service() {
     }
 
     private fun handle(msg: Message) {
-        val l = loop ?: return
         val to = msg.replyTo
         val id = msg.arg1
+        if (loop == null && msg.what == Ipc.RECONFIGURE) {
+            // Pas de boucle (robot pas encore confirmé en « Machine réelle ») : rien ne tourne, on la crée.
+            createLoop()
+            reply(to, id, Verdict.OK)
+            return
+        }
+        if (loop == null && msg.what == Ipc.REGISTER) {
+            if (to != null && clients.none { it.binder == to.binder }) clients += to
+            return
+        }
+        val l = loop ?: return
         val data = msg.data
         data.getString(Ipc.LANG)?.let { if (it != I18n.code) I18n.select(it) }
         when (msg.what) {
@@ -211,14 +263,20 @@ class MachineService : Service() {
                     (if (data.getBoolean("reverse")) Direction.COUNTER_CLOCKWISE else Direction.CLOCKWISE) else null
                 val total = if (data.containsKey("totalMs")) data.getLong("totalMs") else null
                 val hot = data.getBoolean("hot")
-                l.post { c -> reply(to, id, c.adjust(speed, temp, dir, total, hot)) }
+                val smartLevel = if (data.containsKey("smartLevel")) data.getInt("smartLevel") else null
+                l.post { c -> reply(to, id, c.adjust(speed, temp, dir, total, hot, smartLevel)) }
             }
             Ipc.TURBO_DOWN -> {
                 val acc = try { Accessory.valueOf(data.getString("accessory") ?: "") } catch (_: Exception) { Accessory.BLADE }
                 l.post { c -> reply(to, id, c.turboPress(acc)) }
             }
             Ipc.TURBO_UP -> l.post { c -> c.turboRelease() }
-            Ipc.TARE -> l.post { c -> c.tare() }
+            Ipc.CONFIRM_COLD -> l.post { c -> reply(to, id, c.confirmCold()) }
+            Ipc.TARE -> {
+                val learn = !data.getBoolean("auto")
+                l.post { c -> c.tare(learn) }
+            }
+            Ipc.FORGET_BOWL -> l.post { c -> c.forgetEmptyBowl() }
             Ipc.ACK_FAULT -> l.post { c -> reply(to, id, c.acknowledgeFault()) }
             Ipc.RECONFIGURE -> Thread {
                 val busy = try { l.call { it.busy } } catch (_: Exception) { true }
@@ -279,6 +337,8 @@ class MachineService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 7
         private const val CHANNEL = "machine"
+        /** Valeur du bit « bol » quand le bol est en place sur ce robot (voir MachineController.bowlBitSeated). */
+        private const val BOWL_BIT_SEATED = "bowlBitSeated"
 
         fun formatClock(ms: Long): String {
             val s = (ms + 999) / 1000

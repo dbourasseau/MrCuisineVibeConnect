@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Process
+import app.toque.companion.RobotCompanion
 import app.toque.core.i18n.I18n
+import app.toque.core.robot.RobotProfiles
 import app.toque.machine.MachineClient
 import app.toque.recipes.RecipeRepo
 import app.toque.recipes.JsonSourceSync
@@ -15,13 +17,18 @@ import app.toque.ui.MainActivity
 import java.util.Locale
 import javax.net.ssl.HttpsURLConnection
 
-class ToqueApp : Application() {
+open class ToqueApp : Application() {
     lateinit var prefs: Prefs
         private set
     lateinit var log: Logbook
         private set
     val machine: MachineClient by lazy { MachineClient(this) }
-    val recipes: RecipeRepo by lazy { RecipeRepo(this) }
+    val recipes: RecipeRepo by lazy { RecipeRepo(this, log) }
+    /** toqueapp.org : compte relié, recettes de la communauté. */
+    val site: app.toque.site.SiteAccount by lazy { app.toque.site.SiteAccount(this) }
+    /** Toque Compagnon (téléphones sur le Wi-Fi) ; processus de l'interface seulement, null s'il n'a pas pu démarrer. */
+    var companion: RobotCompanion? = null
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -29,6 +36,10 @@ class ToqueApp : Application() {
         log = Logbook(this)
         LanguageFiles.install(this, log)
         I18n.select(I18n.resolve(prefs.language, Locale.getDefault().language).code)
+        app.toque.ui.Ui.setTheme(prefs.lightTheme)
+        app.toque.ui.Ui.setAccent(prefs.accentColor)
+        // Robot choisi : lu par le cœur (recettes, réglages proposés), dans les deux processus.
+        RobotProfiles.active = prefs.robot
         // Racines récentes absentes d'Android 6 (voir ExtraRoots), pour toutes les connexions HTTPS.
         try {
             HttpsURLConnection.setDefaultSSLSocketFactory(ExtraRoots.socketFactory(this))
@@ -55,9 +66,26 @@ class ToqueApp : Application() {
             }
         }
         log.write("interface", "démarrage")
+        startBackground()
+        companion = try {
+            RobotCompanion(this).also {
+                configureCompanion(it)
+                it.start()
+            }
+        } catch (t: Throwable) {
+            log.crash("compagnon", t)
+            null
+        }
+    }
+
+    /** Tâches de fond réseau (heure). Les essais d'interface (Robolectric) n'en lancent aucune. */
+    protected open fun startBackground() {
         TimeSync.start(this, prefs, log)
         JsonSourceSync.start(this)
     }
+
+    /** Réglage du compagnon avant son démarrage (essais : port libre sur la boucle locale). */
+    protected open fun configureCompanion(c: RobotCompanion) {}
 
     private fun isMainProcess(): Boolean {
         val pid = Process.myPid()

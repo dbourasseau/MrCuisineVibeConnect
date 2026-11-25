@@ -25,6 +25,12 @@ import app.toque.core.machine.Verdict
 class MachineClient(private val context: Context) {
     var snapshot = Snapshot()
         private set
+    /**
+     * Le service machine a déjà envoyé un état. Faux au démarrage : sur le robot, il ne dit rien
+     * tant qu'il ouvre la liaison série, et [snapshot] est encore celui par défaut.
+     */
+    var heard = false
+        private set
     val connected: Boolean get() = service != null
 
     private val snapshotListeners = ArrayList<(Snapshot) -> Unit>()
@@ -39,12 +45,13 @@ class MachineClient(private val context: Context) {
         when (msg.what) {
             Ipc.SNAPSHOT -> {
                 snapshot = Ipc.bundleToSnapshot(msg.data)
+                heard = true
                 for (l in ArrayList(snapshotListeners)) l(snapshot)
             }
             Ipc.EVENT -> {
                 val type = try { EventType.valueOf(msg.data.getString("type") ?: "") } catch (_: Exception) { null }
                 if (type != null) {
-                    val e = MachineEvent(type, msg.data.getString("message") ?: "")
+                    val e = MachineEvent(type, msg.data.getString("message") ?: "", msg.data.getInt("value"))
                     for (l in ArrayList(eventListeners)) l(e)
                 }
             }
@@ -115,21 +122,28 @@ class MachineClient(private val context: Context) {
     fun resume(hot: Boolean = false, cb: (Verdict) -> Unit) =
         sendRaw(Ipc.RESUME, Bundle().apply { putBoolean("hot", hot) }, cb)
     fun stop(cb: (Verdict) -> Unit = {}) = sendRaw(Ipc.STOP, null, cb)
-    fun clearFinished() = sendRaw(Ipc.CLEAR, null, null)
-    fun tare() = sendRaw(Ipc.TARE, null, null)
+    fun clearFinished(cb: ((Verdict) -> Unit)? = null) = sendRaw(Ipc.CLEAR, null, cb)
+    /** [auto] : tare faite par Toque (recette), qui n'apprend jamais le poids du bol vide. */
+    fun tare(auto: Boolean = false) = sendRaw(Ipc.TARE, if (auto) Bundle().apply { putBoolean("auto", true) } else null, null)
+    fun forgetEmptyBowl() = sendRaw(Ipc.FORGET_BOWL, null, null)
     fun acknowledge(cb: (Verdict) -> Unit) = sendRaw(Ipc.ACK_FAULT, null, cb)
     fun turboDown(accessory: Accessory, cb: (Verdict) -> Unit) =
         sendRaw(Ipc.TURBO_DOWN, Bundle().apply { putString("accessory", accessory.name) }, cb)
     fun turboUp() = sendRaw(Ipc.TURBO_UP, null, null)
+
+    /** Smart : la personne confirme que le contenu est froid (température pas encore mesurée), avant le Turbo. */
+    fun confirmCold(cb: (Verdict) -> Unit) = sendRaw(Ipc.CONFIRM_COLD, null, cb)
     fun reconfigure(cb: (Verdict) -> Unit) = sendRaw(Ipc.RECONFIGURE, null, cb)
     fun suspendPort(cb: (Verdict) -> Unit) = sendRaw(Ipc.SUSPEND_PORT, null, cb)
     fun resumePort(cb: (Verdict) -> Unit = {}) = sendRaw(Ipc.RESUME_PORT, null, cb)
 
     fun adjust(speed: Int? = null, temp: Int? = null, reverse: Boolean? = null, totalMs: Long? = null,
-               hot: Boolean = false, cb: (Verdict) -> Unit) {
+               hot: Boolean = false, smartLevel: Int? = null, cb: (Verdict) -> Unit) {
         val b = Bundle()
         speed?.let { b.putInt("speed", it) }
         temp?.let { b.putInt("temp", it) }
+        // Smart : niveau de sa table pour 40 °C (absent de celle du Connect), avec [temp].
+        smartLevel?.let { b.putInt("smartLevel", it) }
         reverse?.let { b.putBoolean("reverse", it) }
         totalMs?.let { b.putLong("totalMs", it) }
         b.putBoolean("hot", hot)

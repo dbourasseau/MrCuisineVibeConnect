@@ -261,6 +261,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         while (true) {
             attempt++
             val c = URL(url).openConnection() as HttpURLConnection
+            var keepAlive = false
             try {
                 c.connectTimeout = 20_000
                 c.readTimeout = 30_000
@@ -272,8 +273,9 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                     continue
                 }
                 if (code != 200) throw IOException(tr("réponse %d du serveur", code))
+                val initial = c.contentLength.let { if (it in 4096..maxBytes) it else 16 * 1024 }
                 c.inputStream.use { input ->
-                    val out = ByteArrayOutputStream()
+                    val out = ByteArrayOutputStream(initial)
                     val buf = ByteArray(16 * 1024)
                     while (true) {
                         val n = input.read(buf)
@@ -281,10 +283,11 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                         out.write(buf, 0, n)
                         if (out.size() > maxBytes) throw IOException(tr("réponse trop grande"))
                     }
+                    keepAlive = true
                     return out.toByteArray()
                 }
             } finally {
-                c.disconnect()
+                if (!keepAlive) c.disconnect()
             }
         }
     }

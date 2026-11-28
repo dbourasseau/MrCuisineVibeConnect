@@ -27,18 +27,25 @@ object RecipePhotos {
         if (bounds.outWidth <= 0) throw IOException(tr("image illisible"))
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= MAX_WIDTH) sample *= 2
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: throw IOException(tr("image illisible"))
-        if (bmp.width > MAX_WIDTH) {
-            val scaled = Bitmap.createScaledBitmap(bmp, MAX_WIDTH, bmp.height * MAX_WIDTH / bmp.width, true)
-            if (scaled !== bmp) bmp.recycle()
-            bmp = scaled
+        // Comme OnlineSync de l'upstream 0.12.0 (#120) : RGB_565 (moitié moins de mémoire) et
+        // l'image toujours libérée, même si l'écriture échoue.
+        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }) ?: throw IOException(tr("image illisible"))
+        try {
+            if (bmp.width > MAX_WIDTH) {
+                val scaled = Bitmap.createScaledBitmap(bmp, MAX_WIDTH, bmp.height * MAX_WIDTH / bmp.width, true)
+                if (scaled !== bmp) bmp.recycle()
+                bmp = scaled
+            }
+            val name = url.substringAfterLast('/').substringBefore('?')
+            val tmp = File(dir, "$name.part")
+            FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            if (!tmp.renameTo(File(dir, name))) tmp.delete()
+        } finally {
+            if (!bmp.isRecycled) bmp.recycle()
         }
-        val name = url.substringAfterLast('/').substringBefore('?')
-        val tmp = File(dir, "$name.part")
-        FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        bmp.recycle()
-        if (!tmp.renameTo(File(dir, name))) tmp.delete()
     }
 
     /**
